@@ -1,46 +1,55 @@
 using System;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Windows.Forms;
-using System;
-using System.Net.Sockets;
-using System.Text;
-using System.Windows.Forms;
 
-
-
-namespace Client
+namespace Server
 {
-    public partial class Form1 : Form
+    class Program
     {
-        TcpClient client;
-        NetworkStream stream;
-        int scoreP1 = 0, scoreP2 = 0;
-
-        public Form1()
+        static void Main(string[] args)
         {
-            InitializeComponent();
-            this.Load += Form1_Load;
-        }
+            int port = 5000;
+       
+            TcpListener server = new TcpListener(IPAddress.Any, port);
 
-        private void btnRock_Click(object sender, EventArgs e)
-        {
-
-        }
-
-        private void Form1_Load(object sender, EventArgs e)
-        {
             try
-            {
-                client = new TcpClient("127.0.0.1", 5000);
-                stream = client.GetStream();
-                MessageBox.Show("Connected to Server!");
+            {         
+                server.Start();
+                Console.WriteLine($"[SERVER] Đang nghe cong {port}...");
+
+                while (true)
+                {
+                    TcpClient client = server.AcceptTcpClient();
+                    Console.WriteLine("[SERVER] Client da ket noi!");
+
+              
+                    NetworkStream stream = client.GetStream();
+
+        
+                    byte[] buffer = new byte[1024];
+                    int bytesRead = stream.Read(buffer, 0, buffer.Length);
+                    string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                    Console.WriteLine("[CLIENT]: " + message);
+
+              
+                    string response = "Server da nhan: " + message;
+                    byte[] data = Encoding.UTF8.GetBytes(response);
+                    stream.Write(data, 0, data.Length);
+                    Console.WriteLine("[SERVER] da gui phan hoi cho client");
+
+             
+                    client.Close();
+                }
             }
             catch (Exception ex)
             {
-                MessageBox.Show("Connection failed: " + ex.Message);
+                Console.WriteLine("[ERROR] " + ex.Message);
+            }
+            finally
+            {
+                server.Stop();
             }
         }
     }
 }
-
