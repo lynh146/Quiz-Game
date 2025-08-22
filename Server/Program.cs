@@ -1,52 +1,129 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
+using System.Threading.Tasks;
 
-namespace Server
+namespace QuizServer
 {
     class Program
     {
         static void Main(string[] args)
         {
-            int port = 5000;
-            TcpListener server = new TcpListener(IPAddress.Any, port);
+            var server = new QuizServer(IPAddress.Any, 5000);
+            Console.WriteLine("Starting Quiz Server on :5000 ...");
+            server.Start();
+            Console.WriteLine("Press ENTER to stop.");
+            Console.ReadLine();
+        }
+    }
 
-            try
+    public class QuizServer
+    {
+        private readonly TcpListener _listener;
+
+        // Đáp án đúng theo qnum (1..4) – KHỚP askQuestion ở client
+        private readonly Dictionary<int, int> _answerKey = new Dictionary<int, int>
+        {
+            {1, 2}, {2, 3}, {3, 1}, {4, 2}, {5, 1},
+            {6, 2}, {7, 3}, {8, 3}, {9, 2}, {10, 1},
+        };
+
+        public QuizServer(IPAddress ip, int port)
+        {
+            _listener = new TcpListener(ip, port);
+        }
+
+        public void Start()
+        {
+            _listener.Start();
+            Console.WriteLine("Server listening...");
+
+            Task.Run(async () =>
             {
-                server.Start();
-                Console.WriteLine($"[SERVER] Đang nghe cổng {port}...");
-
-                while (true) // Server luôn chờ client mới
+                while (true)
                 {
-                    TcpClient client = server.AcceptTcpClient();
-                    Console.WriteLine("[SERVER] Client đã kết nối!");
-
-                    NetworkStream stream = client.GetStream();
-                    byte[] buffer = new byte[1024];
-                    int bytesRead = stream.Read(buffer, 0, buffer.Length);
-
-                    // Nhận dữ liệu từ client
-                    string message = Encoding.UTF8.GetString(buffer, 0, bytesRead);
-                    Console.WriteLine("[CLIENT]: " + message);
-
-                    // Gửi phản hồi cho client
-                    string response = "Server đã nhận: " + message;
-                    byte[] data = Encoding.UTF8.GetBytes(response);
-                    stream.Write(data, 0, data.Length);
-                    Console.WriteLine("[SERVER] Đã gửi phản hồi!");
-
-                    // Đóng kết nối với client sau khi xử lý xong
-                    client.Close();
+                    TcpClient client = await _listener.AcceptTcpClientAsync();
+                    Task.Run(() => HandleClient(client));
                 }
-            }
-            catch (Exception ex)
+            });
+        }
+
+        private void HandleClient(TcpClient client)
+        {
+            var ep = client.Client.RemoteEndPoint;
+            Console.WriteLine("Client connected: " + ep);
+
+            using (client)
+            using (var ns = client.GetStream())
+            using (var reader = new StreamReader(ns))
+            using (var writer = new StreamWriter(ns) { AutoFlush = true })
             {
-                Console.WriteLine("[ERROR] " + ex.Message);
-            }
-            finally
-            {
-                server.Stop();
+                try
+                {
+                    // Expect: START|<total>
+                    string line = reader.ReadLine();
+                    if (string.IsNullOrEmpty(line) || !line.StartsWith("START|"))
+                    {
+                        writer.WriteLine("ERR|Expect START");
+                        return;
+                    }
+
+                    int expectedTotal = 0, answered = 0, score = 0;
+                    var parts = line.Split('|');
+                    if (parts.Length >= 2) int.TryParse(parts[1], out expectedTotal);
+
+                    writer.WriteLine("ACK|" + expectedTotal);
+
+                    while (true)
+                    {
+                        string msg = reader.ReadLine();
+                        if (msg == null) break; // disconnected
+
+                        if (msg.StartsWith("ANS|"))
+                        {
+                            // ANS|qnum|selected
+                            var ps = msg.Split('|');
+                            if (ps.Length < 3) { writer.WriteLine("ERR|Bad ANS"); continue; }
+
+                            int qnum, selected;
+                            int.TryParse(ps[1], out qnum);
+                            int.TryParse(ps[2], out selected);
+
+                            answered++;
+                            int correctIndex;
+                            bool correct = _answerKey.TryGetValue(qnum, out correctIndex) && selected == correctIndex;
+                            if (correct) score++;
+
+                            writer.WriteLine("RES|" + qnum + "|" + (correct ? 1 : 0) + "|" + correctIndex);
+
+                            if (expectedTotal > 0 && answered >= expectedTotal)
+                                break;
+                        }
+                        else if (msg == "FINISH")
+                        {
+                            break;
+                        }
+                        else
+                        {
+                            writer.WriteLine("ERR|Unknown");
+                        }
+                    }
+
+                    double pct = expectedTotal > 0 ? (score * 100.0 / expectedTotal) : 0.0;
+                    writer.WriteLine("FINAL|" + score + "|" + expectedTotal + "|" + Math.Round(pct, 2));
+                    Console.WriteLine("Client {0} result {1}/{2}", ep, score, expectedTotal);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Client {0} error: {1}", ep, ex.Message);
+                    try { var w = new StreamWriter(ns) { AutoFlush = true }; w.WriteLine("ERR|" + ex.Message); } catch { }
+                }
+                finally
+                {
+                    Console.WriteLine("Client disconnected: " + ep);
+                }
             }
         }
     }
