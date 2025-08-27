@@ -23,17 +23,14 @@ namespace QuizServer
     {
         private readonly TcpListener _listener;
 
-        // Đáp án đúng theo qnum (1..4) – KHỚP askQuestion ở client
+        // BẢN ĐÁP ÁN KHỚP VỚI CLIENT (qnum: 1..10, đáp án 1..4)
         private readonly Dictionary<int, int> _answerKey = new Dictionary<int, int>
         {
             {1, 2}, {2, 3}, {3, 1}, {4, 2}, {5, 1},
             {6, 2}, {7, 3}, {8, 3}, {9, 2}, {10, 1},
         };
 
-        public QuizServer(IPAddress ip, int port)
-        {
-            _listener = new TcpListener(ip, port);
-        }
+        public QuizServer(IPAddress ip, int port) { _listener = new TcpListener(ip, port); }
 
         public void Start()
         {
@@ -62,7 +59,7 @@ namespace QuizServer
             {
                 try
                 {
-                    // Expect: START|<total>
+                    // START|<total>
                     string line = reader.ReadLine();
                     if (string.IsNullOrEmpty(line) || !line.StartsWith("START|"))
                     {
@@ -97,9 +94,7 @@ namespace QuizServer
                             if (correct) score++;
 
                             writer.WriteLine("RES|" + qnum + "|" + (correct ? 1 : 0) + "|" + correctIndex);
-
-                            if (expectedTotal > 0 && answered >= expectedTotal)
-                                break;
+                            // KHÔNG tự break khi đủ câu – chờ FINISH từ client
                         }
                         else if (msg == "FINISH")
                         {
